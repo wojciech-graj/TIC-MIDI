@@ -37,6 +37,8 @@ You can adjust the audio's resolution, midi-track-to-sfx mapping, and the output
 $ python tic_midi.py -h
 ```
 
+When playing the music with your lua code, set `sustain=true` in your `music` function call, since the converter currently doesn't re-play notes when starting a new frame.
+
 A sample MIDI file, and the cartridge produced with it, can be found in the `example` directory.
 
 ### License
