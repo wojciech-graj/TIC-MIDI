@@ -7,7 +7,7 @@ A MIDI-to-TIC-80 converter.
 ### Features
 - Utilizes up to all 4 audio channels simultaneously
 - Has variable audio resolution to use more or less space in exchange for audio quality
-- Can map midi tracks to sfx as dictated by the user
+- Can map midi tracks to sfx as dictated by the user, allowing for different instruments
 - Has variable volume
 - Sets tempo and speed to match input
 
@@ -16,7 +16,7 @@ A MIDI-to-TIC-80 converter.
 - Disregards multiple MIDI channels
 - Only considers the following MIDI messages: `set_tempo`, `note_on`, `note_off`
 - Only uses the Master Volume TIC-80 command
-- Does not generate sfx and waveforms for various instruments
+- Does not generate sfx and waveforms
 
 ### Usage
 
@@ -58,3 +58,6 @@ A sample MIDI file, and the cartridge produced with it, can be found in the `exa
     You should have received a copy of the GNU Affero General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ```
+
+Portions of this software are copyright of their respective authors:
+- [mido](https://github.com/mido/mido), Licensed under the [MIT License](https://opensource.org/licenses/MIT); Copyright (c) Ole Martin Bjørndalen
