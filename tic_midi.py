@@ -28,7 +28,7 @@ from mido.midifiles.tracks import _to_abstime
 from typing import List, Tuple, Optional, Dict
 
 
-VERSION_STRING = "TIC-MIDI v0.1.0 2023-03-17 by Wojciech Graj"
+VERSION_STRING = "TIC-MIDI v0.1.1 2023-03-17 by Wojciech Graj"
 
 
 class Chunk:
@@ -208,7 +208,8 @@ def convert(
         pc: PatternChunk,
         resolution: int = 4,
         sfx_names: Optional[Dict] = None,
-        track_idx: int = 0):
+        track_idx: int = 0,
+        octave_shift: int = 0):
     start_time = time.time()
 
     # Combine all messages from all tracks into a list of MessageExt
@@ -290,9 +291,9 @@ def convert(
 
                 # Assign values to pattern row
                 r = pc.patterns[frame.get_ch(channel_idx)].rows[pattern_row_idx]
-                note_scaled = max(0, msg.note - 36)
+                note_scaled = max(0, msg.note - 24)
                 volume = msg.velocity // 8
-                r.set(note_scaled % 12 + 4, volume, volume, 1, msge.sfx, note_scaled // 12)
+                r.set(note_scaled % 12 + 4, volume, volume, 1, msge.sfx, max(0, min(7, note_scaled // 12 + octave_shift)))
                 channel_state.channels[channel_idx].set(msg.note, msge.sfx, msg.time)
             else:  # Stop a note
                 # Find appropriate channel index
@@ -334,6 +335,7 @@ if __name__ == "__main__":
     parser.add_argument('--resolution', default=4, type=int, help="Accepted values: [0,7]. Determines how many notes will be used per beat. Lower values use more space but can be more detailed.")
     parser.add_argument('--sfx-names', default="{}", help="Accepts a dict in of the form {'MIDI Track Name':sfx_index}. Used to map MIDI tracks to specific sfx.")
     parser.add_argument('--track', default=0, type=int, help="Accepted values: [0,7].")
+    parser.add_argument('--octave-shift', default=0, type=int, help="Shift all notes by some number of octaves.")
     args = parser.parse_args()
 
     # Validate arguments
@@ -355,6 +357,7 @@ if __name__ == "__main__":
             pc,
             resolution=args.resolution,
             sfx_names=args.sfx_names,
-            track_idx=args.track)
+            track_idx=args.track,
+            octave_shift=args.octave_shift)
 
     tic_save(args.output, tc, pc)
