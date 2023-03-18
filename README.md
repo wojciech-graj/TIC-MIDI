@@ -10,6 +10,7 @@ A MIDI-to-TIC-80 converter.
 - Can map midi tracks to sfx as dictated by the user, allowing for different instruments
 - Has variable volume
 - Sets tempo and speed to match input
+- Can insert music into existing cart
 
 ### Limitations
 - Can only write a single file to a single track
@@ -32,7 +33,7 @@ Then, simply invoke the script:
 $ python tic_midi.py input_file -o output_file
 ```
 
-You can adjust the audio's resolution, midi-track-to-sfx mapping, and the output track by using the appropriate arguments. To learn about them, invoke the script with the `-h` flag:
+To learn about the settings you can use, invoke the script with the `-h` flag:
 ```
 $ python tic_midi.py -h
 ```

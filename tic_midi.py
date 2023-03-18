@@ -20,6 +20,7 @@ import argparse
 import ctypes
 import itertools
 import mido
+import os
 import struct
 import sys
 import time
@@ -28,7 +29,7 @@ from mido.midifiles.tracks import _to_abstime
 from typing import List, Tuple, Optional, Dict
 
 
-VERSION_STRING = "TIC-MIDI v0.1.1 2023-03-17 by Wojciech Graj"
+VERSION_STRING = "TIC-MIDI v0.1.1 2023-03-18 by Wojciech Graj"
 
 
 class Chunk:
@@ -42,10 +43,18 @@ class Chunk:
         self.size = size
         self.bank = bank
 
+    @classmethod
+    def from_binary(self, binary: Tuple[int]):
+        return Chunk(
+            binary[0] & 0x1F,
+            binary[1] | (binary[2] << 8),
+            binary[0] >> 5
+        )
+
     def serialize(self) -> Tuple[int]:
         """Return the 4-byte chunk header"""
         return (
-            (self.bank & 0xE0) | (self.chunk_type & 0x1F),
+            ((self.bank << 5) & 0xE0) | (self.chunk_type & 0x1F),
             self.size & 0x00FF,
             (self.size & 0xFF00) >> 8,
             0,
@@ -58,22 +67,24 @@ class PatternRow(ctypes.LittleEndianStructure):
         ("param1", ctypes.c_uint32, 4),
         ("param2", ctypes.c_uint32, 4),
         ("command", ctypes.c_uint32, 3),
-        ("sfx", ctypes.c_uint32, 6),  # Some weird bit rearranging has to be done because it crosses a byte boundary.
+        ("_sfx", ctypes.c_uint32, 6),  # Some weird bit rearranging has to be done because it crosses a byte boundary.
         ("octave", ctypes.c_uint32, 3),
     ]
 
-    def set_sfx(self, sfx: int) -> None:
-        self.sfx = (sfx << 1) | (sfx >> 5)
+    @property
+    def sfx(self) -> int:
+        return ((self._sfx >> 1) | (self._sfx << 5)) & 0x3f
 
-    def get_sfx(self) -> int:
-        return ((self.sfx >> 1) | (self.sfx << 5)) & 0x3f
+    @sfx.setter
+    def sfx(self, sfx: int) -> None:
+        self._sfx = (sfx << 1) | (sfx >> 5)
 
     def set(self, note: int, param1: int, param2: int, command: int, sfx: int, octave: int) -> None:
         self.note = note
         self.param1 = param1
         self.param2 = param2
         self.command = command
-        self.set_sfx(sfx)
+        self.sfx = sfx
         self.octave = octave
 
     def serialize(self) -> Tuple[int]:
@@ -124,23 +135,27 @@ class Frame(ctypes.LittleEndianStructure):
 
 class Track(ctypes.LittleEndianStructure):
     _fields_ = [
-        ("tempo", ctypes.c_int8),
+        ("_tempo", ctypes.c_int8),
         ("nrows", ctypes.c_uint8),
-        ("speed", ctypes.c_int8),
+        ("_speed", ctypes.c_int8),
     ]
     frames: List[Frame]
 
-    def get_tempo(self) -> int:
-        return self.tempo + 150
+    @property
+    def tempo(self) -> int:
+        return self._tempo + 150
 
-    def set_tempo(self, tempo: int) -> None:
-        self.tempo = min(250, max(40, tempo)) - 150
+    @tempo.setter
+    def tempo(self, tempo: int) -> None:
+        self._tempo = min(250, max(40, tempo)) - 150
 
-    def get_speed(self) -> int:
-        return self.speed + 6
+    @property
+    def speed(self) -> int:
+        return self._speed + 6
 
-    def set_speed(self, speed: int) -> None:
-        self.speed = speed - 6
+    @speed.setter
+    def speed(self, speed: int) -> None:
+        self._speed = speed - 6
 
     def __init__(self) -> None:
         self.frames = [Frame() for i in range(16)]
@@ -183,12 +198,12 @@ class Channel:
     """State of a single Track channel"""
     note: int = 0
     sfx: int = 0
-    set_time: int = 0
+    time_set: int = 0
 
-    def set(self, note: int, sfx: int, set_time: int) -> None:
+    def set(self, note: int, sfx: int, time_set: int) -> None:
         self.note = note
         self.sfx = sfx
-        self.set_time = set_time
+        self.time_set = time_set
 
 
 class ChannelState:
@@ -230,14 +245,14 @@ def convert(
 
     # Get track and set values
     track = tc.tracks[track_idx]
-    track.set_speed(resolution + 2)
+    track.speed = resolution + 2
 
     # Deduce tempo from MetaMessages
     tempo = 500000
     for msge in messages:
         if msge.msg.type == "set_tempo":
             tempo = msge.msg.tempo
-    track.set_tempo(int(mido.tempo2bpm(tempo)))
+    track.tempo = int(mido.tempo2bpm(tempo))
 
     # Remove MetaMessages
     messages = filter(lambda msge: not msge.msg.is_meta, messages)
@@ -279,7 +294,7 @@ def convert(
                 if channel_idx == -1:  # Replace empty channel
                     channel_idx = channel_state.index(0, 0)
                 if channel_idx == -1:  # Replace oldest channel
-                    channel_idx = channel_state.channels.index(min(channel_state.channels, key=lambda channel: channel.set_time))
+                    channel_idx = channel_state.channels.index(min(channel_state.channels, key=lambda channel: channel.time_set))
 
                 # Assign pattern to channel if unassigned
                 if frame.get_ch(channel_idx) == -1:
@@ -315,11 +330,31 @@ def convert(
     print(f"Used {next_unused_pattern}/60 patterns.")
 
 
-def tic_save(filename: str, track_chunk: TrackChunk, pattern_chunk: PatternChunk) -> None:
-    with open(filename, "wb") as f:
-        f.write(bytearray(Chunk(17, 0).serialize()))
-        f.write(bytearray(track_chunk.serialize()))
-        f.write(bytearray(pattern_chunk.serialize()))
+def tic_save(
+        filename: str,
+        track_chunk: TrackChunk,
+        pattern_chunk: PatternChunk,
+        insert: bool = False) -> None:
+    if insert:
+        filename_new = f"{filename}.new"
+        with open(filename_new, "wb") as fd:
+            with open(filename, "r+b") as fs:
+                for header in iter(lambda: fs.read(4), b''):
+                    chunk = Chunk.from_binary(tuple(header))
+                    if chunk.chunk_type in {14, 15}:
+                        fs.seek(chunk.size, os.SEEK_CUR)
+                    else:
+                        fs.seek(-4, os.SEEK_CUR)
+                        fd.write(fs.read(chunk.size + 4))
+            fd.write(bytearray(track_chunk.serialize()))
+            fd.write(bytearray(pattern_chunk.serialize()))
+        os.replace(filename_new, filename)
+    else:
+        with open(filename, "wb") as f:
+            f.write(bytearray(Chunk(17, 0).serialize()))
+            f.write(bytearray(track_chunk.serialize()))
+            f.write(bytearray(pattern_chunk.serialize()))
+
     print(f"Saved to {filename}.")
 
 
@@ -336,6 +371,9 @@ if __name__ == "__main__":
     parser.add_argument('--sfx-names', default="{}", help="Accepts a dict in of the form {'MIDI Track Name':sfx_index}. Used to map MIDI tracks to specific sfx.")
     parser.add_argument('--track', default=0, type=int, help="Accepted values: [0,7].")
     parser.add_argument('--octave-shift', default=0, type=int, help="Shift all notes by some number of octaves.")
+    ins_or_ovr = parser.add_mutually_exclusive_group()
+    ins_or_ovr.add_argument('--insert', action='store_true', help="Insert Track and Pattern Chunks into an existing cartridge while leaving remaining chunks intact.")
+    ins_or_ovr.add_argument('--overwrite', action='store_true', help="Overwrite an existing cartridge if it exists.")
     args = parser.parse_args()
 
     # Validate arguments
@@ -347,6 +385,14 @@ if __name__ == "__main__":
         print("ERROR: sfx-names is not a dict.")
         sys.exit(1)
     args.track = max(0, min(7, args.track))
+
+    output_file_exists = os.path.isfile(args.output)
+    if output_file_exists and not args.overwrite and not args.insert:
+        print(f"Cartridge '{args.output}' already exists. Use '--overwrite' to overwrite.")
+        sys.exit(1)
+    elif not output_file_exists and args.insert:
+        print(f"Cartridge '{args.output}' does not exist, but is required by '--insert'.")
+        sys.exit(1)
 
     # Run conversion and save
     tc = TrackChunk()
@@ -360,4 +406,4 @@ if __name__ == "__main__":
             track_idx=args.track,
             octave_shift=args.octave_shift)
 
-    tic_save(args.output, tc, pc)
+    tic_save(args.output, tc, pc, insert=args.insert)
