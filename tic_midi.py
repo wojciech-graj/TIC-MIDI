@@ -19,6 +19,7 @@
 import argparse
 import ctypes
 import itertools
+import logging
 import mido
 import os
 import struct
@@ -224,7 +225,7 @@ def convert(
         resolution: int = 4,
         sfx_names: Optional[Dict] = None,
         track_idx: int = 0,
-        octave_shift: int = 0):
+        octave_shift: int = 0) -> bool:
     start_time = time.time()
 
     # Combine all messages from all tracks into a list of MessageExt
@@ -232,12 +233,12 @@ def convert(
     messages = []
     for track in mid.tracks:
         if next_unused_sfx > 63:
-            print("WARNING: MIDI file contains over 64 tracks. Discarding excess tracks.")
+            logging.warning("MIDI file contains over 64 tracks. Discarding excess tracks.")
             break
         if sfx_names:
             if track.name not in sfx_names:
-                print(f"ERROR: MIDI Track '{track.name}' not found in sfx-names.")
-                sys.exit(1)
+                logging.error(f"MIDI Track '{track.name}' not found in sfx-names.")
+                return False
             next_unused_sfx = sfx_names[track.name]
         messages.extend((MessageExt(msg, next_unused_sfx) for msg in _to_abstime(track)))
         next_unused_sfx += 1
@@ -284,7 +285,7 @@ def convert(
                     break
                 frame_idx += 1
                 if frame_idx > 15:
-                    print("WARNING: Used all available frames in track.")
+                    logging.warning("Used all available frames in track.")
                     raise StopIteration()
                 frame = track.frames[frame_idx]
 
@@ -299,7 +300,7 @@ def convert(
                 # Assign pattern to channel if unassigned
                 if frame.get_ch(channel_idx) == -1:
                     if next_unused_pattern == 60:
-                        print("WARNING: Used all available patterns.")
+                        logging.warning("Used all available patterns.")
                         raise StopIteration()
                     frame.set_ch(channel_idx, next_unused_pattern)
                     next_unused_pattern += 1
@@ -321,13 +322,15 @@ def convert(
                 r.note = 1
                 channel_state.channels[channel_idx].set(0, 0, msg.time)
     except StopIteration:
-        print("WARNING: Terminating early.")
+        logging.warning("Terminated early.")
 
     # Print summary
-    print(f"Finished converting in {1000 * (time.time() - start_time):.2f} millis.")
-    print(f"Converted {mido.tick2second(msg.time, mid.ticks_per_beat, tempo):.2f} seconds of music.")
-    print(f"Used {frame_idx + 1}/16 frames on track {track_idx}.")
-    print(f"Used {next_unused_pattern}/60 patterns.")
+    logging.info(f"Finished converting in {1000 * (time.time() - start_time):.2f} millis.")
+    logging.info(f"Converted {mido.tick2second(msg.time, mid.ticks_per_beat, tempo):.2f} seconds of music.")
+    logging.info(f"Used {min(16, frame_idx + 1)}/16 frames on track {track_idx}.")
+    logging.info(f"Used {min(60, next_unused_pattern)}/60 patterns.")
+
+    return True
 
 
 def tic_save(
@@ -356,10 +359,12 @@ def tic_save(
             f.write(bytearray(track_chunk.serialize()))
             f.write(bytearray(pattern_chunk.serialize()))
 
-    print(f"Saved to {filename}.")
+    logging.info(f"Saved to {filename}.")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     # Parse arguments
     parser = argparse.ArgumentParser(
         prog='tic-midi',
@@ -384,29 +389,31 @@ if __name__ == "__main__":
     args.resolution = max(0, min(7, args.resolution))
     args.sfx_names = eval(args.sfx_names)
     if not isinstance(args.sfx_names, dict):
-        print("ERROR: sfx-names is not a dict.")
+        logging.error("sfx-names is not a dict.")
         sys.exit(1)
     args.track = max(0, min(7, args.track))
     args.bank = max(0, min(7, args.bank))
 
     output_file_exists = os.path.isfile(args.output)
     if output_file_exists and not args.overwrite and not args.insert:
-        print(f"Cartridge '{args.output}' already exists. Use '--overwrite' to overwrite.")
+        logging.error(f"Cartridge '{args.output}' already exists. Use '--overwrite' to overwrite.")
         sys.exit(1)
     elif not output_file_exists and args.insert:
-        print(f"Cartridge '{args.output}' does not exist, but is required by '--insert'.")
+        logging.error(f"Cartridge '{args.output}' does not exist, but is required by '--insert'.")
         sys.exit(1)
 
     # Run conversion and save
     tc = TrackChunk(bank=args.bank)
     pc = PatternChunk(bank=args.bank)
 
-    convert(mido.MidiFile(args.input),
-            tc,
-            pc,
-            resolution=args.resolution,
-            sfx_names=args.sfx_names,
-            track_idx=args.track,
-            octave_shift=args.octave_shift)
+    converted = convert(mido.MidiFile(args.input),
+                        tc,
+                        pc,
+                        resolution=args.resolution,
+                        sfx_names=args.sfx_names,
+                        track_idx=args.track,
+                        octave_shift=args.octave_shift)
+    if not converted:
+        sys.exit(1)
 
     tic_save(args.output, tc, pc, insert=args.insert)
