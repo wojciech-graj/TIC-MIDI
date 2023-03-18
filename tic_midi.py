@@ -232,14 +232,14 @@ def convert(
     next_unused_sfx = 0
     messages = []
     for track in mid.tracks:
-        if next_unused_sfx > 63:
-            logging.warning("MIDI file contains over 64 tracks. Discarding excess tracks.")
-            break
         if sfx_names:
             if track.name not in sfx_names:
                 logging.error(f"MIDI Track '{track.name}' not found in sfx-names.")
                 return False
             next_unused_sfx = sfx_names[track.name]
+        elif next_unused_sfx > 63:
+            logging.warning("MIDI file contains over 64 tracks. Discarded excess tracks.")
+            break
         messages.extend((MessageExt(msg, next_unused_sfx) for msg in _to_abstime(track)))
         next_unused_sfx += 1
     messages.sort(key=lambda msge: msge.msg.time)
@@ -309,7 +309,11 @@ def convert(
                 r = pc.patterns[frame.get_ch(channel_idx)].rows[pattern_row_idx]
                 note_scaled = max(0, msg.note - 24)
                 volume = msg.velocity // 8
-                r.set(note_scaled % 12 + 4, volume, volume, 1, msge.sfx, max(0, min(7, note_scaled // 12 + octave_shift)))
+                octave = note_scaled // 12 + octave_shift
+                if octave < 0 or octave > 7:
+                    logging.warning(f"track {track_idx}:frame {frame_idx}:channel {channel_idx + 1}:row {pattern_row_idx}:Note with octave {octave} is beyond playable range. Consider using '--octave-shift'.")
+                    octave = max(0, min(7, octave))
+                r.set(note_scaled % 12 + 4, volume, volume, 1, msge.sfx, octave)
                 channel_state.channels[channel_idx].set(msg.note, msge.sfx, msg.time)
             else:  # Stop a note
                 # Find appropriate channel index
@@ -325,10 +329,10 @@ def convert(
         logging.warning("Terminated early.")
 
     # Print summary
-    logging.info(f"Finished converting in {1000 * (time.time() - start_time):.2f} millis.")
-    logging.info(f"Converted {mido.tick2second(msg.time, mid.ticks_per_beat, tempo):.2f} seconds of music.")
+    logging.info(f"Converted {mido.tick2second(msg.time, mid.ticks_per_beat, tempo):.2f} seconds of music in {1000 * (time.time() - start_time):.2f} millis.")
     logging.info(f"Used {min(16, frame_idx + 1)}/16 frames on track {track_idx}.")
     logging.info(f"Used {min(60, next_unused_pattern)}/60 patterns.")
+    logging.info(f"Ended on row {min(63, pattern_row_idx)} on frame {min(15, frame_idx)}.")
 
     return True
 
