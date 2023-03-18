@@ -167,8 +167,8 @@ class Track(ctypes.LittleEndianStructure):
 class TrackChunk(Chunk):
     tracks: List[Track]
 
-    def __init__(self) -> None:
-        super().__init__(14, 408)
+    def __init__(self, bank: int = 0) -> None:
+        super().__init__(14, 408, bank=bank)
         self.tracks = [Track() for i in range(8)]
 
     def serialize(self) -> Tuple[int]:
@@ -178,8 +178,8 @@ class TrackChunk(Chunk):
 class PatternChunk(Chunk):
     patterns: List[Pattern]
 
-    def __init__(self) -> None:
-        super().__init__(15, 11520)
+    def __init__(self, bank: int = 0) -> None:
+        super().__init__(15, 11520, bank=bank)
         self.patterns = [Pattern() for i in range(60)]
 
     def serialize(self) -> Tuple[int]:
@@ -341,7 +341,8 @@ def tic_save(
             with open(filename, "r+b") as fs:
                 for header in iter(lambda: fs.read(4), b''):
                     chunk = Chunk.from_binary(tuple(header))
-                    if chunk.chunk_type in {14, 15}:
+                    if ((chunk.chunk_type == 14 and chunk.bank == track_chunk.bank)
+                            or (chunk.chunk_type == 15 and chunk.bank == pattern_chunk.bank)):
                         fs.seek(chunk.size, os.SEEK_CUR)
                     else:
                         fs.seek(-4, os.SEEK_CUR)
@@ -370,6 +371,7 @@ if __name__ == "__main__":
     parser.add_argument('--resolution', default=4, type=int, help="Accepted values: [0,7]. Determines how many notes will be used per beat. Lower values use more space but can be more detailed.")
     parser.add_argument('--sfx-names', default="{}", help="Accepts a dict in of the form {'MIDI Track Name':sfx_index}. Used to map MIDI tracks to specific sfx.")
     parser.add_argument('--track', default=0, type=int, help="Accepted values: [0,7].")
+    parser.add_argument('--bank', default=0, type=int, help="Memory bank.")
     parser.add_argument('--octave-shift', default=0, type=int, help="Shift all notes by some number of octaves.")
     ins_or_ovr = parser.add_mutually_exclusive_group()
     ins_or_ovr.add_argument('--insert', action='store_true', help="Insert Track and Pattern Chunks into an existing cartridge while leaving remaining chunks intact.")
@@ -385,6 +387,7 @@ if __name__ == "__main__":
         print("ERROR: sfx-names is not a dict.")
         sys.exit(1)
     args.track = max(0, min(7, args.track))
+    args.bank = max(0, min(7, args.bank))
 
     output_file_exists = os.path.isfile(args.output)
     if output_file_exists and not args.overwrite and not args.insert:
@@ -395,8 +398,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Run conversion and save
-    tc = TrackChunk()
-    pc = PatternChunk()
+    tc = TrackChunk(bank=args.bank)
+    pc = PatternChunk(bank=args.bank)
 
     convert(mido.MidiFile(args.input),
             tc,

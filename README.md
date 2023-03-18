@@ -11,6 +11,7 @@ A MIDI-to-TIC-80 converter.
 - Has variable volume
 - Sets tempo and speed to match input
 - Can insert music into existing cart
+- Can use any memory bank
 
 ### Limitations
 - Can only write a single file to a single track
