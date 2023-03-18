@@ -22,6 +22,7 @@ import itertools
 import logging
 import mido
 import os
+import random
 import struct
 import sys
 import time
@@ -225,7 +226,8 @@ def convert(
         resolution: int = 4,
         sfx_names: Optional[Dict] = None,
         track_idx: int = 0,
-        octave_shift: int = 0) -> bool:
+        octave_shift: int = 0,
+        replacement_policy: str = 'fifo') -> bool:
     start_time = time.time()
 
     # Combine all messages from all tracks into a list of MessageExt
@@ -294,8 +296,13 @@ def convert(
                 channel_idx = channel_state.index(msg.note, msge.sfx)  # Replace channel with same note
                 if channel_idx == -1:  # Replace empty channel
                     channel_idx = channel_state.index(0, 0)
-                if channel_idx == -1:  # Replace oldest channel
-                    channel_idx = channel_state.channels.index(min(channel_state.channels, key=lambda channel: channel.time_set))
+                if channel_idx == -1:  # Replace channel in accordance with replacement policy
+                    if replacement_policy == 'random':
+                        channel_idx = random.randrange(4)
+                    elif replacement_policy == 'fifo':
+                        channel_idx = channel_state.channels.index(min(channel_state.channels, key=lambda channel: channel.time_set))
+                    elif replacement_policy == 'lifo':
+                        channel_idx = channel_state.channels.index(max(channel_state.channels, key=lambda channel: channel.time_set))
 
                 # Assign pattern to channel if unassigned
                 if frame.get_ch(channel_idx) == -1:
@@ -368,12 +375,13 @@ def tic_save(
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    random.seed()
 
     # Parse arguments
     parser = argparse.ArgumentParser(
         prog='tic-midi',
-        description='Convert a MIDI file to a TIC-80 cartridge.'
-    )
+        description='Convert a MIDI file to a TIC-80 cartridge.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('input')
     parser.add_argument('-v', '--version', action='version', version=VERSION_STRING, help=f"show version: {VERSION_STRING}")
     parser.add_argument('-o', '--output', required=True)
@@ -382,6 +390,7 @@ if __name__ == "__main__":
     parser.add_argument('--track', default=0, type=int, help="Accepted values: [0,7].")
     parser.add_argument('--bank', default=0, type=int, help="Memory bank.")
     parser.add_argument('--octave-shift', default=0, type=int, help="Shift all notes by some number of octaves.")
+    parser.add_argument('--replacement-policy', choices={'random', 'fifo', 'lifo'}, default='fifo', help="Determines note placement in channels when all channels are in use.")
     ins_or_ovr = parser.add_mutually_exclusive_group()
     ins_or_ovr.add_argument('--insert', action='store_true', help="Insert Track and Pattern Chunks into an existing cartridge while leaving remaining chunks intact.")
     ins_or_ovr.add_argument('--overwrite', action='store_true', help="Overwrite an existing cartridge if it exists.")
@@ -416,7 +425,8 @@ if __name__ == "__main__":
                         resolution=args.resolution,
                         sfx_names=args.sfx_names,
                         track_idx=args.track,
-                        octave_shift=args.octave_shift)
+                        octave_shift=args.octave_shift,
+                        replacement_policy=args.replacement_policy)
     if not converted:
         sys.exit(1)
 
