@@ -22,7 +22,7 @@ A MIDI-to-TIC-80 converter.
 
 ### Usage
 
-The script has only been tested on Python 3.9, so your mileage may vary on other versions.
+Make sure Python (3.8+) is available on your system.
 
 Install the dependencies:
 ```
