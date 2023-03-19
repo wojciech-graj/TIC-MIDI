@@ -227,7 +227,8 @@ def convert(
         sfx_names: Optional[Dict] = None,
         track_idx: int = 0,
         octave_shift: int = 0,
-        replacement_policy: str = 'fifo') -> bool:
+        replacement_policy: str = 'fifo',
+        terminate: bool = True) -> bool:
     start_time = time.time()
 
     # Combine all messages from all tracks into a list of MessageExt
@@ -335,11 +336,21 @@ def convert(
     except StopIteration:
         logging.warning("Terminated early.")
 
+    frame_idx = min(15, frame_idx)
+    pattern_row_idx = min(63, pattern_row_idx)
+
+    # Add terminator
+    if terminate:
+        for channel_idx in range(4):
+            if (pattern_idx := track.frames[frame_idx].get_ch(channel_idx)) != -1:
+                pc.patterns[pattern_idx].rows[pattern_row_idx].note = 1
+        logging.info(f"Added terminator on row {pattern_row_idx} on frame {min(15, frame_idx)}")
+
     # Print summary
     logging.info(f"Converted {mido.tick2second(msg.time, mid.ticks_per_beat, tempo):.2f} seconds of music in {1000 * (time.time() - start_time):.2f} millis.")
-    logging.info(f"Used {min(16, frame_idx + 1)}/16 frames on track {track_idx}.")
+    logging.info(f"Used {frame_idx + 1}/16 frames on track {track_idx}.")
     logging.info(f"Used {min(60, next_unused_pattern)}/60 patterns.")
-    logging.info(f"Ended on row {min(63, pattern_row_idx)} on frame {min(15, frame_idx)}.")
+    logging.info(f"Ended on row {pattern_row_idx} on frame {min(15, frame_idx)}.")
 
     return True
 
@@ -391,6 +402,7 @@ if __name__ == "__main__":
     parser.add_argument('--bank', default=0, type=int, help="Memory bank.")
     parser.add_argument('--octave-shift', default=0, type=int, help="Shift all notes by some number of octaves.")
     parser.add_argument('--replacement-policy', choices={'random', 'fifo', 'lifo'}, default='fifo', help="Determines note placement in channels when all channels are in use.")
+    parser.add_argument('--no-terminator', action='store_true', help="Do not end playback on all channels at the end of tracks.")
     ins_or_ovr = parser.add_mutually_exclusive_group()
     ins_or_ovr.add_argument('--insert', action='store_true', help="Insert Track and Pattern Chunks into an existing cartridge while leaving remaining chunks intact.")
     ins_or_ovr.add_argument('--overwrite', action='store_true', help="Overwrite an existing cartridge if it exists.")
@@ -426,7 +438,8 @@ if __name__ == "__main__":
                         sfx_names=args.sfx_names,
                         track_idx=args.track,
                         octave_shift=args.octave_shift,
-                        replacement_policy=args.replacement_policy)
+                        replacement_policy=args.replacement_policy,
+                        terminate=not args.no_terminator)
     if not converted:
         sys.exit(1)
 
