@@ -22,26 +22,37 @@ A MIDI-to-TIC-80 converter.
 
 ### Usage
 
-Make sure Python (3.8+) is available on your system.
+Make sure Python (3.9+) is available on your system.
 
 Install the dependencies:
+```sh
+pip install -e .
 ```
-$ pip install -r requirements.txt
+OR
+```sh
+pip install 'mido>=1.2.0,<=1.3.2'
 ```
 
 Then, simply invoke the script:
-```
-$ python tic_midi.py input_file -o output_file
+```sh
+python tic_midi.py input_file -o output_file
 ```
 
 To learn about the settings you can use, invoke the script with the `-h` flag:
-```
-$ python tic_midi.py -h
+```sh
+python tic_midi.py -h
 ```
 
 When playing the music with your lua code, set `sustain=true` in your `music` function call, since the converter currently doesn't re-play notes when starting a new frame.
 
 A sample MIDI file, and the cartridge produced with it, can be found in the `example` directory.
+
+### Development setup
+
+Install the development dependencies:
+```sh
+pip install -e '.[dev]'
+```
 
 ### License
 ```
